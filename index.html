@@ -335,6 +335,9 @@
     <div class="project-pill" id="projectLabel">Argyle Commercial FM 407</div>
     <span id="overallBadge" class="status-badge badge-on-track">● On Track</span>
     <div id="saveStatus"><span class="save-dot" id="saveDot"></span><span id="saveLabel">All changes saved</span></div>
+    <button class="btn btn-ghost btn-sm" onclick="exportJSON()" style="padding:4px 10px;font-size:11px" title="Download data as JSON file for Google Drive backup">💾 Save File</button>
+    <button class="btn btn-ghost btn-sm" onclick="document.getElementById('importFile').click()" style="padding:4px 10px;font-size:11px" title="Load a previously saved JSON file">📂 Load File</button>
+    <input type="file" id="importFile" accept=".json" style="display:none" onchange="importJSON(event)">
     <button class="btn btn-ghost btn-sm" onclick="doLogout()" style="padding:4px 10px;font-size:11px">⏏ Logout</button>
   </div>
 </header>
@@ -732,7 +735,24 @@ function showToast(msg,icon='✓') {
   setTimeout(()=>t.classList.remove('show'),2800);
 }
 
-function openModal(id){document.getElementById('modal-'+id).classList.add('open');}
+function openModal(id) {
+  document.getElementById('modal-'+id).classList.add('open');
+  // Always refresh partner dropdown when opening contribution modal
+  if (id === 'addContrib') {
+    const sel = document.getElementById('ac-partner');
+    const partners = proj().partners || [];
+    if (sel) {
+      sel.innerHTML = partners.length
+        ? partners.map(p=>`<option value="${p.name}">${p.name}</option>`).join('')
+        : '<option value="">— No partners added yet —</option>';
+    }
+    // Set today's date as default
+    const dateField = document.getElementById('ac-date');
+    if (dateField && !dateField.value) {
+      dateField.value = new Date().toISOString().slice(0,10);
+    }
+  }
+}
 function closeModal(id){document.getElementById('modal-'+id).classList.remove('open');}
 
 // ==================== KPIs ====================
@@ -1332,7 +1352,6 @@ function loadData() {
     if (!raw) return false;
     const saved = JSON.parse(raw);
     if (saved.projects && Array.isArray(saved.projects)) {
-      // Merge saved data into projects array preserving structure
       saved.projects.forEach((sp, i) => {
         if (projects[i]) {
           projects[i].items        = sp.items        || projects[i].items;
@@ -1347,6 +1366,61 @@ function loadData() {
     }
   } catch(e) {}
   return false;
+}
+
+// ==================== EXPORT / IMPORT JSON ====================
+function exportJSON() {
+  const payload = {
+    app: 'BuildLedger',
+    version: '2.4',
+    savedAt: new Date().toISOString(),
+    savedBy: 'admin',
+    projects
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {type: 'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  const date = new Date().toISOString().slice(0,10);
+  a.download = 'buildledger-data-' + date + '.json';
+  a.click();
+  URL.revokeObjectURL(a.href);
+  showToast('Data exported — save to Google Drive', '💾');
+}
+
+function importJSON(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const data = JSON.parse(e.target.result);
+      if (!data.projects || !Array.isArray(data.projects)) {
+        showToast('Invalid file — not a BuildLedger backup', '⚠');
+        return;
+      }
+      data.projects.forEach((sp, i) => {
+        if (projects[i]) {
+          projects[i].items         = sp.items         || projects[i].items;
+          projects[i].draws         = sp.draws         || projects[i].draws;
+          projects[i].partners      = sp.partners      || projects[i].partners;
+          projects[i].contributions = sp.contributions || projects[i].contributions;
+          if (sp.retainedEarnings !== undefined) projects[i].retainedEarnings = sp.retainedEarnings;
+          if (sp.netIncome        !== undefined) projects[i].netIncome        = sp.netIncome;
+        }
+      });
+      // Also persist to localStorage
+      localStorage.setItem(DATA_KEY, JSON.stringify({ projects, currentIdx, savedAt: new Date().toISOString() }));
+      renderAll();
+      const saved = data.savedAt ? new Date(data.savedAt).toLocaleDateString() : 'unknown date';
+      showToast('Data loaded from ' + saved, '📂');
+      document.getElementById('saveLabel').textContent = 'Loaded from file';
+    } catch(err) {
+      showToast('Failed to read file — check format', '⚠');
+    }
+    // Reset input so same file can be re-loaded if needed
+    event.target.value = '';
+  };
+  reader.readAsText(file);
 }
 
 // Patch all mutation functions to trigger autoSave
